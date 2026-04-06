@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orbit}
+      POSTGRES_USER: ${POSTGRES_USER:-orbit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orbit} -d ${POSTGRES_DB:-orbit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orbit-net
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orbit-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - backend/.env
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-orbit}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-orbit}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - orbit-net
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    env_file:
+      - backend/.env
+    environment:
+      PORT: 3001
+      BACKEND_URL: http://backend:8080
+    depends_on:
+      - backend
+    networks:
+      - orbit-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - backend/.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    depends_on:
+      - gateway
+    networks:
+      - orbit-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  orbit-net:
+    driver: bridge
